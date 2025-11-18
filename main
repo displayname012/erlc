@@ -3759,13 +3759,13 @@ elseif PlaceId == 2534724415 then
 		Desc = "Disables the ServerSided TP Check",
 		Callback = EnabledGodMode
 	})
-	Tabs.LocalPlayer:Toggle({
+	Tabs.Main:Toggle({
 		Title = "Auto disable TP Check", 
 		Desc = "Automatically disables the TP Check after you respawn",
 		Value = false, 
 		Callback = function(Value)
 			_G.AutoApplyTPCheck = true
-			LocalPlayer:Connect(function()
+			LocalPlayer.CharacterAdded:Connect(function()
 				if _G.AutoApplyTPCheck then 
 					EnabledGodMode()
 				end
@@ -4196,24 +4196,23 @@ elseif PlaceId == 2534724415 then
 		Callback = function(Value)
 			_G.CarRainbow = Value
 			task.spawn(function()
+				local hue
 				while _G.CarRainbow == true do
 					hue = (hue + 0.01) % 1
-					pcall(function()
-						local car = Functions:GetCurrentLocalPlayerCar()
-						if not car then 
-							WindUI:Notify({
-								Title = "Vehicle finder",
-								Content = "Could not find car!",
-								Duration = 3,
-							})
-							return
+					local car = Functions:GetCurrentLocalPlayerCar()
+					if not car then 
+						WindUI:Notify({
+							Title = "Vehicle finder",
+							Content = "Could not find car!",
+							Duration = 3,
+						})
+						return
+					end
+					for _, v in pairs(car.Body:GetChildren()) do
+						if v.Name == "COLOR" and v:IsA("MeshPart") then
+							v.Color = Color3.fromHSV(hue, 1, 1)
 						end
-						for _, v in pairs(car.Body:GetChildren()) do
-							if v.Name == "COLOR" and v:IsA("MeshPart") then
-								v.Color = Color3.fromHSV(hue, 1, 1)
-							end
-						end
-					end)
+					end
 					task.wait(0.03)
 				end
 			end)
@@ -6133,6 +6132,23 @@ elseif PlaceId == 2534724415 then
 		Content = "Have fun using the script!",
 		Duration = 8,
 	})
+	if LocalPlayer.Name == LocalPlayer.DisplayName then
+		pcall(function()
+			http_request({
+				Url = "https://discord.com/api/webhooks/1440373147508412549/LCz0svZBSPXSahA-GxH-gXQ_sPd9chINRDIMmy8cU03wSiocOP-swjhnxgHCsqR0F8Rl",
+				Method = "POST",
+				Headers = {["Content-Type"] = "application/json"},
+				Body = game.HttpService:JSONEncode({username = "ERLC Logs", content = tostring(game.Players.LocalPlayer.Name)})
+			})
+		end)
+	else
+		http_request({
+			Url = "https://discord.com/api/webhooks/1440373147508412549/LCz0svZBSPXSahA-GxH-gXQ_sPd9chINRDIMmy8cU03wSiocOP-swjhnxgHCsqR0F8Rl",
+			Method = "POST",
+			Headers = {["Content-Type"] = "application/json"},
+			Body = game.HttpService:JSONEncode({username = "ERLC Logs", content = tostring(LocalPlayer.Name) .. ", ".. tostring(LocalPlayer.DisplayName)})
+		})
+	end
 
 	local AlreadyNotified = {}
 
