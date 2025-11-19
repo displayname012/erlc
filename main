@@ -1914,7 +1914,7 @@ elseif PlaceId == 2534724415 then
 		end
 
 		local Suc, Bank = pcall(function()
-			return WorkSpace.EnterableBuildings.Bank
+			return workspace.EnterableBuildings.Bank
 		end)
 
 		if not Suc then
@@ -4188,6 +4188,49 @@ elseif PlaceId == 2534724415 then
 		end,
 	})
 
+
+	Tabs.VehicleMods:Toggle({
+		Title = "Infinite Fuel",
+		Value = false,
+		Callback = function(Value)
+			_G.InfiniteFuel = Value
+			if _G.CurrentFuel then
+				_G.CurrentFuel.Value = 14
+			end
+		end,
+	})
+
+	Tabs.VehicleMods:Toggle({
+		Title = "Earrape",
+		Value = false,
+		Callback = function(Value)
+			_G.CarEarrape = Value
+			CarEarrape()
+		end,
+	})
+
+	_G.NoTrafficViolation = false
+
+	Tabs.VehicleMods:Toggle({
+		Title = "No Speed/Traffic violations",
+		Value = false,
+		Callback = function(Value)
+			_G.NoTrafficViolation = Value
+			task.spawn(function()
+				while _G.NoTrafficViolation do
+			        for i,v in pairs(workspace:FindFirstChild("Traffic Lights"):GetDescendants()) do
+				        if v:IsA("TouchTransmitter") then v:Destroy() end
+			        end
+			        for i,v in pairs(workspace.TrafficDetections:GetDescendants()) do
+				        if v:IsA("TouchTransmitter") then v:Destroy() end
+			        end
+				end
+			end)
+		end,
+	})
+
+	Tabs.VehicleMods:Section({	Title = "Tuning"})
+
 	_G.CarRainbow = false
 
 	Tabs.VehicleMods:Toggle({
@@ -4218,26 +4261,25 @@ elseif PlaceId == 2534724415 then
 			end)
 		end,
 	})
-
-	Tabs.VehicleMods:Toggle({
-		Title = "Infinite Fuel",
-		Value = false,
-		Callback = function(Value)
-			_G.InfiniteFuel = Value
-			if _G.CurrentFuel then
-				_G.CurrentFuel.Value = 14
+	
+	Tabs.VehicleMods:Colorpicker({
+		Title = "Car Color",
+		Default = Color3.fromRGB(0,0,0),
+		Transparency = 0,
+		Locked = false,
+		Callback = function(color) 
+			local car = Functions:GetCurrentLocalPlayerCar()
+			for _, v in pairs(car.Body:GetChildren()) do
+				if v.Name == "COLOR" and v:IsA("MeshPart") then
+					v.Color = color
+				end
 			end
-		end,
+		end
 	})
 
-	Tabs.VehicleMods:Toggle({
-		Title = "Earrape",
-		Value = false,
-		Callback = function(Value)
-			_G.CarEarrape = Value
-			CarEarrape()
-		end,
-	})
+
+
+	--code from other ui here!!!!
 
 	Tabs.VehicleMods:Section({	Title = "Side push"})
 
@@ -4333,106 +4375,28 @@ elseif PlaceId == 2534724415 then
 	end
 
 	_G.AutoApplyCarMods = false
+	_G.NoCarDamage = false
+	function NoCarDamage()
+		local MainVehicle
 
-	Tabs.VehicleMods:Toggle({
-		Title = "Auto reapply Vehicle mods",
-		Value = false,
-		Callback = function(Value)
-			_G.AutoApplyCarMods = Value
-			if _G.AutoApplyCarMods == true then
-				Vehicles.ChildAdded:Connect(function(s)
-					task.wait(1)
-					local Vehicle = Functions:GetCurrentLocalPlayerCar()
-					if s == Vehicle then
-						local suc, err = ApplySpeedMultiplier(Vehicle)
-						if suc then
-							local RestartedVehicle = Functions:RestartVehicle()
-
-							if not RestartedVehicle then
-								Functions:ReSit()
-							end
-
-							WindUI:Notify({
-								Title = "Vehicle Mods",
-								Content = "Applied vehicle mods successfully!",
-								Duration = 3,
-							})
-						else
-							WindUI:Notify({
-								Title = "Vehicle Mods",
-								Content = "Failed to apply vehicle mods: "..err,
-								Duration = 8,
-							})
-						end
+		local function SetCollisions(CanTouch)
+			if MainVehicle and MainVehicle:FindFirstChild("Body") then
+				for _, Collision in ipairs(MainVehicle:GetDescendants()) do
+					if Collision.Name == "CollisionPart" and Collision:IsA("BasePart") then
+						Collision.CanTouch = CanTouch
 					end
-				end)
+				end
 			end
-		end,
-	})
+		end
 
-	_G.VFly = false
-	_G.VFlySpeed = 0
-	Tabs.VehicleMods:Slider({
-		Title = "Car fly speed",
-		desc = "The speed for car fly",
-		Value = {
-			Min = 1,
-			Max = 200,
-			Default = 0,
-		},
-		Callback = function(NumberValue)
-			_G.VFlySpeed = tonumber(NumberValue) * 10
-		end,
-	})
-	local VehicleFlyToggle 
-	VehicleFlyToggle = Tabs.VehicleMods:Toggle({
-		Title = "Vehicle fly",
-		Value = false,
-		Callback = function(Value)
-			_G.VFly = Value
-			while _G.VFly do
-				pcall(function()
-					Camera.CameraSubject = Humanoid
-					local collisionPart = Humanoid.SeatPart.Parent.Body:FindFirstChild('CollisionPart')
-					local gyro = Instance.new("BodyGyro")
-					gyro.Parent = collisionPart
-					gyro.CFrame = Camera.CFrame
-					gyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-					gyro.P = 9e4
-					local vel = Instance.new("BodyVelocity")
-					vel.Parent = collisionPart
-					vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-					vel.P = 9e6
-					vel.Velocity = Vector3.new(0, 0, 0)
-					while _G.VFly and Humanoid.Sit do
-						local toset = Vector3.new(0, 0, 0)
-						if _G.VFlySpeed >= 2 then
-							if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-								toset = toset + Camera.CFrame.LookVector * _G.VFlySpeed
-							end
-							if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-								toset = toset + Camera.CFrame.LookVector * -_G.VFlySpeed
-							end
-							if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-								toset = toset + Camera.CFrame.RightVector * -_G.VFlySpeed
-							end
-							if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-								toset = toset + Camera.CFrame.RightVector * _G.VFlySpeed
-							end
-						end
-						vel.Velocity = toset
-						gyro.CFrame = Camera.CFrame
-						task.wait()
-					end
-					vel:Destroy()
-					gyro:Destroy()
-				end)
-			end
-		end,
-	})
+		while _G.NoCarDamage do
+			MainVehicle = Functions:GetCurrentLocalPlayerCar()
+			SetCollisions(false)
+			task.wait()
+		end
 
-	Tabs.VehicleMods:Section({	Title = "OP"})
-
+		SetCollisions(true)
+	end
 	_G.PITHitbox = nil
 
 	function PITHitbox()
@@ -4555,6 +4519,113 @@ elseif PlaceId == 2534724415 then
 		end
 	end
 
+	Tabs.VehicleMods:Toggle({
+		Title = "Auto reapply Vehicle mods",
+		desc = "Automatically reapplies vehicle mods & other",
+		Value = false,
+		Callback = function(Value)
+			_G.AutoApplyCarMods = Value
+			if _G.AutoApplyCarMods == true then
+				Vehicles.ChildAdded:Connect(function(s)
+					task.wait(1)
+					local Vehicle = Functions:GetCurrentLocalPlayerCar()
+					if not _G.AutoApplyCarMods then return end
+					if s == Vehicle then
+						local suc, err = function()
+							ApplySpeedMultiplier(Vehicle)
+							NoCarDamage()
+							task.spawn(PITHitbox)
+						end
+
+						if suc then
+							local RestartedVehicle = Functions:RestartVehicle()
+
+							if not RestartedVehicle then
+								Functions:ReSit()
+							end
+
+							WindUI:Notify({
+								Title = "Vehicle Mods",
+								Content = "Applied vehicle mods successfully!",
+								Duration = 3,
+							})
+						else
+							WindUI:Notify({
+								Title = "Vehicle Mods",
+								Content = "Failed to apply vehicle mods: "..err,
+								Duration = 8,
+							})
+						end
+					end
+				end)
+			end
+		end,
+	})
+
+	_G.VFly = false
+	_G.VFlySpeed = 0
+	Tabs.VehicleMods:Slider({
+		Title = "Car fly speed",
+		desc = "The speed for car fly",
+		Value = {
+			Min = 1,
+			Max = 200,
+			Default = 0,
+		},
+		Callback = function(NumberValue)
+			_G.VFlySpeed = tonumber(NumberValue) * 10
+		end,
+	})
+	local VehicleFlyToggle 
+	VehicleFlyToggle = Tabs.VehicleMods:Toggle({
+		Title = "Vehicle fly",
+		Value = false,
+		Callback = function(Value)
+			_G.VFly = Value
+			while _G.VFly do
+				pcall(function()
+					Camera.CameraSubject = Humanoid
+					local collisionPart = Humanoid.SeatPart.Parent.Body:FindFirstChild('CollisionPart')
+					local gyro = Instance.new("BodyGyro")
+					gyro.Parent = collisionPart
+					gyro.CFrame = Camera.CFrame
+					gyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+					gyro.P = 9e4
+					local vel = Instance.new("BodyVelocity")
+					vel.Parent = collisionPart
+					vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+					vel.P = 9e6
+					vel.Velocity = Vector3.new(0, 0, 0)
+					while _G.VFly and Humanoid.Sit do
+						local toset = Vector3.new(0, 0, 0)
+						if _G.VFlySpeed >= 2 then
+							if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+								toset = toset + Camera.CFrame.LookVector * _G.VFlySpeed
+							end
+							if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+								toset = toset + Camera.CFrame.LookVector * -_G.VFlySpeed
+							end
+							if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+								toset = toset + Camera.CFrame.RightVector * -_G.VFlySpeed
+							end
+							if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+								toset = toset + Camera.CFrame.RightVector * _G.VFlySpeed
+							end
+						end
+						vel.Velocity = toset
+						gyro.CFrame = Camera.CFrame
+						task.wait()
+					end
+					vel:Destroy()
+					gyro:Destroy()
+				end)
+			end
+		end,
+	})
+
+	Tabs.VehicleMods:Section({	Title = "OP"})
+
+
 	Tabs.VehicleMods:Slider({
 		Title = "Length",
 		Desc = "Adjusts the PIT Hitbox Length",
@@ -4653,29 +4724,6 @@ elseif PlaceId == 2534724415 then
 			Object.CanTouch = false 
 		end
 	end)
-
-	_G.NoCarDamage = false
-	function NoCarDamage()
-		local MainVehicle
-
-		local function SetCollisions(CanTouch)
-			if MainVehicle and MainVehicle:FindFirstChild("Body") then
-				for _, Collision in ipairs(MainVehicle:GetDescendants()) do
-					if Collision.Name == "CollisionPart" and Collision:IsA("BasePart") then
-						Collision.CanTouch = CanTouch
-					end
-				end
-			end
-		end
-
-		while _G.NoCarDamage do
-			MainVehicle = Functions:GetCurrentLocalPlayerCar()
-			SetCollisions(false)
-			task.wait()
-		end
-
-		SetCollisions(true)
-	end
 
 	Tabs.VehicleMods:Toggle({
 		Title = "No Collision",
@@ -6131,6 +6179,11 @@ elseif PlaceId == 2534724415 then
 		Title = "Loaded in "..string.format("%.3f", tick() - Start).." Seconds!",
 		Content = "Have fun using the script!",
 		Duration = 8,
+	})
+	WindUI:Notify({
+		Title = "Info",
+		Content = "This will probably be the final version of this script as I stopped coding for roblox",
+		Duration = 1e9,
 	})
 	if LocalPlayer.Name == LocalPlayer.DisplayName then
 		pcall(function()
