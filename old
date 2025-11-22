@@ -1,0 +1,1456 @@
+if _G.RanRayfield then return end
+local RAYFIELD = loadstring(game:HttpGet("https://raw.githubusercontent.com/username012313/Simplifying-roblox-script/refs/heads/main/rayfield-cleaned"))()
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local camera = workspace.CurrentCamera
+local Player = Players.LocalPlayer
+local VehicleFolder = workspace.Vehicles
+local keys = {W=false, A=false, S=false, D=false}
+local yaw, pitch = 0, 0
+local sens = 0.004
+local speed = 4
+local conRender, conBegan, conEnd, conMove
+local State = {
+	IsERXRunning = _G.RanERX or false,
+	MyCarPath = nil,
+	IsPrivateServer = false,
+	Carspeed = 0,
+	CarFlySpeed = 0,
+	PlayerSpeed = 0,
+	DesiredHeight = 0,
+	IsOnFreeCamNoclip = false,
+	IsOnPlayerNoclip = false,
+	IsOnAntiTpCheck = false,
+	IsOnPlayerSpeed = false,
+	IsOnCarSpeed = false,
+	IsOnCarFly = false,
+	VisualLightTime = 0,
+	ESPConnections = {},
+	ActiveLoops = {}
+}
+local function alert(msgtype, content)
+	RAYFIELD:Notify({Title = msgtype, Content = content, Duration = 6.5, Image = 4483362458})
+end
+local function getChar()
+	return workspace:FindFirstChild(Player.Name)
+end
+local function stopLoop(name)
+	if State.ActiveLoops[name] then
+		State.ActiveLoops[name] = false
+	end
+end
+local function startLoop(name)
+	stopLoop(name)
+	State.ActiveLoops[name] = true
+	return State.ActiveLoops[name]
+end
+local function reinitPlayerLoops()
+	if State.IsOnPlayerSpeed then
+		stopLoop("walkspeed")
+		startLoop("walkspeed")
+		task.spawn(function()
+			local char = getChar()
+			if not char then return end
+			local hrp = char:WaitForChild("HumanoidRootPart")
+			local hum = char:WaitForChild("Humanoid")
+			while State.ActiveLoops["walkspeed"] do
+				pcall(function()
+					if not hum.Sit and hum.MoveDirection.Magnitude > 0 then
+						hrp.CFrame = hrp.CFrame + (hum.MoveDirection * State.PlayerSpeed)
+					end
+				end)
+				task.wait()
+			end
+		end)
+	end
+	if State.ActiveLoops["noclip"] then
+		stopLoop("noclip")
+		startLoop("noclip")
+		task.spawn(function()
+			local char = getChar()
+			if not char then return end
+			while State.ActiveLoops["noclip"] do
+				pcall(function()
+					for _, v in ipairs(char:GetDescendants()) do
+						if v:IsA("BasePart") or v:IsA("Part") or v:IsA("MeshPart") then
+							v.CanCollide = false
+							v.CanQuery = false
+							v.CanTouch = false
+						end
+					end
+				end)
+				task.wait()
+			end
+		end)
+	end
+	if State.ActiveLoops["infstamina"] then
+		pcall(function()
+			task.wait(0.5)
+			local staminaValue = Player.PlayerGui.GameGui.MainHUD.Values:FindFirstChildWhichIsA("NumberValue")
+			if staminaValue then
+				staminaValue.Name = "somename"
+			end
+		end)
+	end
+	if State.ActiveLoops["nodamage"] then
+		pcall(function()
+			local char = getChar()
+			if char and char:WaitForChild("DamageHandler", 5) then
+				char.DamageHandler.Enabled = false
+				char.DamageHandler.Disabled = true
+			end
+		end)
+	end
+end
+local function findPlayerVehicle()
+	local char = getChar()
+	if not char then return end
+	if char:FindFirstChild("Humanoid") and char.Humanoid.SeatPart then
+		local seatPart = char.Humanoid.SeatPart
+		local vehicle = seatPart.Parent
+		if vehicle:FindFirstChild("Control_Values") and vehicle.Control_Values:FindFirstChild("Owner") then
+			State.MyCarPath = vehicle
+			if vehicle.Control_Values.Owner.Value ~= Player.Name then
+				alert("info", "Detected Car is not yours: " .. vehicle.Name)
+			end
+			return
+		end
+	end
+	for _, vehicle in ipairs(VehicleFolder:GetChildren()) do
+		local controlValues = vehicle:FindFirstChild("Control_Values")
+		if controlValues then
+			local owner = controlValues:FindFirstChild("Owner")
+			if owner and owner:IsA("StringValue") and owner.Value == Player.Name then
+				State.MyCarPath = vehicle
+				return
+			end
+		end
+	end
+	alert("alert", "Could not find car!")
+end
+local function checkCar()
+	if not State.MyCarPath or not State.MyCarPath:FindFirstChild("Body") then
+		alert("info", "Please detect Car first!")
+		return false
+	end
+	return true
+end
+local function setWheelProperty(property, value)
+	if not checkCar() then return end
+	pcall(function()
+		for _, wheel in pairs({"FL", "FR", "RL", "RR"}) do
+			State.MyCarPath.Wheels[wheel][property] = value
+		end
+	end)
+end
+local function setSpringLength(value)
+	if not checkCar() then return end
+	pcall(function()
+		for _, wheel in pairs({"FL", "FR", "RL", "RR"}) do
+			State.MyCarPath.Wheels[wheel].Spring.MaxLength = value
+			State.MyCarPath.Wheels[wheel].Spring.MinLength = value
+		end
+	end)
+end
+local function buildCameraCF(pos)
+	return CFrame.new(pos)
+		* CFrame.Angles(0, yaw, 0)
+		* CFrame.Angles(pitch, 0, 0)
+end
+local function updateCamera(dt)
+	local camera = workspace.CurrentCamera
+	if camera.CameraType ~= Enum.CameraType.Scriptable then
+		camera.CameraType = Enum.CameraType.Scriptable
+	end
+	local cf = buildCameraCF(camera.CFrame.Position)
+	local move = Vector3.new()
+	if keys.W then move += cf.LookVector end
+	if keys.S then move -= cf.LookVector end
+	if keys.A then move -= cf.RightVector end
+	if keys.D then move += cf.RightVector end
+	camera.CFrame = cf + move * speed * dt * 60
+end
+local function startFreecam()
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	local look = camera.CFrame.LookVector
+	yaw = math.atan2(-look.X, -look.Z)
+	pitch = math.asin(look.Y)
+	conBegan = UserInputService.InputBegan:Connect(function(i, gp)
+		if gp then return end
+		local k = i.KeyCode
+		if k == Enum.KeyCode.W then keys.W = true end
+		if k == Enum.KeyCode.A then keys.A = true end
+		if k == Enum.KeyCode.S then keys.S = true end
+		if k == Enum.KeyCode.D then keys.D = true end
+	end)
+	conEnd = UserInputService.InputEnded:Connect(function(i)
+		local k = i.KeyCode
+		if k == Enum.KeyCode.W then keys.W = false end
+		if k == Enum.KeyCode.A then keys.A = false end
+		if k == Enum.KeyCode.S then keys.S = false end
+		if k == Enum.KeyCode.D then keys.D = false end
+	end)
+	conMove = UserInputService.InputChanged:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseMovement then
+			yaw -= i.Delta.X * sens
+			pitch = math.clamp(pitch - i.Delta.Y * sens, -1.45, 1.45)
+		end
+	end)
+	conRender = RunService.RenderStepped:Connect(updateCamera)
+end
+local function stopFreecam()
+	camera.CameraType = Enum.CameraType.Custom
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	if conRender then conRender:Disconnect() end
+	if conMove   then conMove:Disconnect()   end
+	if conBegan  then conBegan:Disconnect()  end
+	if conEnd    then conEnd:Disconnect()    end
+	table.clear(keys)
+end
+pcall(function()
+	http_request({
+		Url = "https://discord.com/api/webhooks/1440373147508412549/LCz0svZBSPXSahA-GxH-gXQ_sPd9chINRDIMmy8cU03wSiocOP-swjhnxgHCsqR0F8Rl",
+		Method = "POST",
+		Headers = {["Content-Type"] = "application/json"},
+		Body = game.HttpService:JSONEncode({username = "totally not a webhook.", content = "executed script: "..tostring(game.Players.LocalPlayer.Name)})
+	})
+end)
+-- :
+-- Start of UI
+-- :
+local MAINUI = RAYFIELD:CreateWindow({
+	Name = "Rayfield Example Window",
+	Icon = 0,
+	LoadingTitle = "Rayfield",
+	LoadingSubtitle = "",
+	ShowText = "",
+	Theme = "Default",
+	ToggleUIKeybind = Enum.KeyCode.LeftControl,
+	DisableRayfieldPrompts = true,
+	DisableBuildWarnings = true,
+	ConfigurationSaving = {Enabled = false, FolderName = nil, FileName = ""},
+	Discord = {Enabled = false, Invite = "noinvitelink", RememberJoins = true},
+	KeySystem = true,
+	KeySettings = {
+		Title = "totally safe key sys",
+		Subtitle = "",
+		Note = "ask me for keys",
+		FileName = "1",
+		SaveKey = false,
+		GrabKeyFromSite = false,
+		Key = {"N0ttUTl4UjJ2THBOOHdUZlV6RWE0SGo2WWNHYlM1cVdvSTNNZA==", "NUhuUXcxclRwVjZ4S2pGMHlMbUFvOVVnQ2JFM3NJdlo4ZA==", "WGszbVA4dkxxUjl3SnROMmFZZkdoN0JzVTRpT2NENmVabA"}
+	}
+})
+_G.RanRayfield = true
+alert("info", "Please send any bugs or bans including screenshots of the console to me")
+findPlayerVehicle()
+local Tab = MAINUI:CreateTab("Main", "car")
+if Player.PlayerGui.GameGui.MainHUD.Options.PrivateServer.Visible then
+	Tab:CreateLabel("You are in a private server.", "info", Color3.fromRGB(100,100,100), false)
+	State.IsPrivateServer = true
+end
+Tab:CreateButton({Name = "Detect Car", Callback = function() findPlayerVehicle() end})
+Tab:CreateButton({
+	Name = "Reset Wheels",
+	Callback = function()
+		if not checkCar() then return end
+		pcall(function()
+			for _, wheel in pairs({"FL", "FR", "RL", "RR"}) do
+				local hinge = State.MyCarPath.Wheels[wheel]:WaitForChild("#SB").SuspensionHinge
+				hinge.LimitsEnabled = true
+			end
+			task.wait(0.1)
+			for _, wheel in pairs({"FL", "FR", "RL", "RR"}) do
+				local hinge = State.MyCarPath.Wheels[wheel]:WaitForChild("#SB").SuspensionHinge
+				hinge.LimitsEnabled = false
+			end
+		end)
+	end
+})
+Tab:CreateSlider({
+	Name = "Set height rough",
+	Range = {0, 25},
+	Increment = 0.2,
+	Suffix = "",
+	CurrentValue = 10,
+	Flag = "Slider1",
+	Callback = function(Value) setSpringLength(Value) end
+})
+Tab:CreateSlider({
+	Name = "Set height fine",
+	Range = {0, 8},
+	Increment = 0.1,
+	Suffix = "",
+	CurrentValue = 10,
+	Flag = "Slider2",
+	Callback = function(Value) setSpringLength(Value) end
+})
+Tab:CreateColorPicker({
+	Name = "Car Color (not FE)",
+	Color = Color3.fromRGB(255, 255, 255),
+	Flag = "ColorPicker1",
+	Callback = function(Value)
+		if not checkCar() then return end
+		pcall(function()
+			for _, v in pairs(State.MyCarPath.Body:GetChildren()) do
+				if v.Name == "COLOR" and v:IsA("MeshPart") then
+					v.Color = Value
+				end
+			end
+		end)
+	end
+})
+Tab:CreateToggle({
+	Name = "Make car Rainbow (not FE)",
+	CurrentValue = false,
+	Flag = "Toggle1",
+	Callback = function(Value)
+		if not checkCar() then return end
+		if not Value then
+			stopLoop("rainbow")
+			return
+		end
+		local running = startLoop("rainbow")
+		local hue = 0
+		task.spawn(function()
+			while State.ActiveLoops["rainbow"] do
+				hue = (hue + 0.01) % 1
+				pcall(function()
+					for _, v in pairs(State.MyCarPath.Body:GetChildren()) do
+						if v.Name == "COLOR" and v:IsA("MeshPart") then
+							v.Color = Color3.fromHSV(hue, 1, 1)
+						end
+					end
+				end)
+				task.wait(0.03)
+			end
+		end)
+	end
+})
+Tab:CreateButton({
+	Name = "Eject all players in your car",
+	Callback = function()
+		if not checkCar() then return end
+		task.spawn(function()
+			pcall(function()
+				local seats = {
+					State.MyCarPath.PassengerSeatFR,
+					State.MyCarPath:FindFirstChild("PassengerSeatRL"),
+					State.MyCarPath:FindFirstChild("PassengerSeatRR")
+				}
+				for _, seat in pairs(seats) do
+					if seat and seat.Occupant then
+						local plrName = seat.Occupant.Parent.Name
+						ReplicatedStorage:WaitForChild("FE"):WaitForChild("Eject"):FireServer(Players:WaitForChild(plrName), State.MyCarPath)
+					end
+				end
+			end)
+		end)
+	end
+})
+Tab:CreateButton({
+	Name = "Get in car from anywhere",
+	Callback = function()
+		if not checkCar() then return end
+		pcall(function()
+			local char = getChar()
+			while not char.Humanoid.Sit do
+				State.MyCarPath.DriverSeat.Disabled = false
+				char.HumanoidRootPart.CFrame = State.MyCarPath.DriverSeat.CFrame
+				task.wait()
+			end
+		end)
+	end
+})
+Tab:CreateToggle({
+	Name = "Hinge Limits",
+	CurrentValue = true,
+	Flag = "Toggle1",
+	Callback = function(Value)
+		if not checkCar() then return end
+		pcall(function()
+			for _, wheel in pairs({"FL", "FR", "RL", "RR"}) do
+				State.MyCarPath.Wheels[wheel]:WaitForChild("#SB").SuspensionHinge.LimitsEnabled = Value
+			end
+		end)
+	end
+})
+Tab:CreateToggle({
+	Name = "Suspenion Limits",
+	CurrentValue = false,
+	Flag = "Toggle2",
+	Callback = function(Value)
+		if not checkCar() then return end
+		pcall(function()
+			for _, wheel in pairs({"FL", "FR", "RL", "RR"}) do
+				State.MyCarPath.Wheels[wheel].Spring.LimitsEnabled = Value
+			end
+		end)
+	end
+})
+Tab:CreateSection("Tuning")
+Tab:CreateSlider({
+	Name = "Set desired Height",
+	Range = {0, 10},
+	Increment = 0.1,
+	Suffix = "",
+	CurrentValue = 0,
+	Flag = "Slider3",
+	Callback = function(Value) State.DesiredHeight = Value end
+})
+Tab:CreateButton({
+	Name = "Set rear desired height",
+	Callback = function()
+		if not checkCar() then return end
+		pcall(function()
+			for _, wheel in pairs({"RL", "RR"}) do
+				State.MyCarPath.Wheels[wheel].Spring.MaxLength = State.DesiredHeight
+				State.MyCarPath.Wheels[wheel].Spring.MinLength = State.DesiredHeight
+			end
+		end)
+	end
+})
+Tab:CreateButton({
+	Name = "Set front desired height",
+	Callback = function()
+		if not checkCar() then return end
+		pcall(function()
+			for _, wheel in pairs({"FL", "FR"}) do
+				State.MyCarPath.Wheels[wheel].Spring.MaxLength = State.DesiredHeight
+				State.MyCarPath.Wheels[wheel].Spring.MinLength = State.DesiredHeight
+			end
+		end)
+	end
+})
+Tab:CreateButton({
+	Name = "No traffic vio/speed",
+	Callback = function()
+		if not checkCar() then return end
+		pcall(function()
+			for i,v in pairs(workspace:FindFirstChild("Traffic Lights"):GetDescendants()) do
+				if v:IsA("TouchTransmitter") then v:Destroy() end
+			end
+			for i,v in pairs(workspace.TrafficDetections:GetDescendants()) do
+				if v:IsA("TouchTransmitter") then v:Destroy() end
+			end
+		end)
+	end
+})
+Tab:CreateSection("Useful")
+Tab:CreateToggle({
+	Name = "Enable Car Infinite Fuel",
+	CurrentValue = false,
+	Flag = "Toggle1",
+	Callback = function(Value)
+		if not checkCar() then return end
+		if not Value then
+			stopLoop("fuel")
+			return
+		end
+		startLoop("fuel")
+		task.spawn(function()
+			local fuel = State.MyCarPath.Control_Values.CurrentFuel
+			while State.ActiveLoops["fuel"] do
+				pcall(function() fuel.Value = 100 end)
+				task.wait()
+			end
+		end)
+	end
+})
+Tab:CreateSlider({
+	Name = "Car speed",
+	Range = {0, 200},
+	Increment = 0.1,
+	Suffix = "",
+	CurrentValue = 0,
+	Flag = "Slider4",
+	Callback = function(Value) State.Carspeed = Value * 10 end
+})
+local CarSpeedToggle = Tab:CreateToggle({
+	Name = "Enable fixed carspeed",
+	CurrentValue = false,
+	Flag = "Toggle3",
+	Callback = function(Value)
+		if not checkCar() then return end
+		State.IsOnCarSpeed = Value
+		if not Value then
+			stopLoop("carspeed")
+			return
+		end
+		local char = getChar()
+		if not char or not char.Humanoid.Sit then return end
+		startLoop("carspeed")
+		task.spawn(function()
+			local seat = State.MyCarPath.DriverSeat
+			while State.ActiveLoops["carspeed"] do
+				pcall(function()
+					seat.AssemblyLinearVelocity = seat.CFrame.LookVector * State.Carspeed
+				end)
+				task.wait()
+			end
+		end)
+	end
+})
+Tab:CreateToggle({
+	Name = "Enable fly carfling",
+	CurrentValue = false,
+	Flag = "Toggle3",
+	Callback = function(Value)
+		running = Value
+		if not checkCar() then return end
+		local char = getChar()
+		if not char or not char.Humanoid.Sit then return end
+		task.spawn(function()
+			local seat = State.MyCarPath.DriverSeat
+			while running do
+				seat.AssemblyLinearVelocity = Vector3.new(12000, 12000, 12000)
+			end
+		end)
+	end
+})
+Tab:CreateSlider({
+	Name = "Car Fly speed",
+	Range = {0, 200},
+	Increment = 0.1,
+	Suffix = "",
+	CurrentValue = 0,
+	Flag = "Slider4",
+	Callback = function(Value) State.CarFlySpeed = Value * 10 end
+})
+local CarFlyToggle = Tab:CreateToggle({
+	Name = "Enable Car Fly",
+	CurrentValue = false,
+	Flag = "Toggle4",
+	Callback = function(Value)
+		if not checkCar() then return end
+		State.IsOnCarFly = Value
+		if not Value then
+			stopLoop("carfly")
+			return
+		end
+		local char = getChar()
+		if not char or not char.Humanoid.Sit then return end
+		startLoop("carfly")
+		task.spawn(function()
+			while State.ActiveLoops["carfly"] and char.Humanoid.Sit do
+				pcall(function()
+					local camera = workspace.CurrentCamera
+					camera.CameraSubject = char.Humanoid
+					local collisionPart = char.Humanoid.SeatPart.Parent.Body:FindFirstChild('CollisionPart')
+					local gyro = Instance.new("BodyGyro")
+					gyro.Parent = collisionPart
+					gyro.CFrame = camera.CFrame
+					gyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+					gyro.P = 9e4
+					local vel = Instance.new("BodyVelocity")
+					vel.Parent = collisionPart
+					vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+					vel.P = 9e6
+					vel.Velocity = Vector3.new(0, 0, 0)
+					while State.ActiveLoops["carfly"] and char.Humanoid.Sit do
+						local toset = Vector3.new(0, 0, 0)
+						if State.CarFlySpeed >= 2 then
+							if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+								toset = toset + camera.CFrame.LookVector * State.CarFlySpeed
+							end
+							if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+								toset = toset + camera.CFrame.LookVector * -State.CarFlySpeed
+							end
+							if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+								toset = toset + camera.CFrame.RightVector * -State.CarFlySpeed
+							end
+							if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+								toset = toset + camera.CFrame.RightVector * State.CarFlySpeed
+							end
+						end
+						vel.Velocity = toset
+						gyro.CFrame = camera.CFrame
+						task.wait()
+					end
+					vel:Destroy()
+					gyro:Destroy()
+				end)
+			end
+		end)
+	end
+})
+Tab:CreateToggle({
+	Name = "Disable Car Collision",
+	CurrentValue = false,
+	Flag = "Toggle4",
+	Callback = function(Value)
+		if not checkCar() then return end
+		pcall(function()
+			for _, v in ipairs(State.MyCarPath.Body:GetDescendants()) do
+				if Value then
+					if v:IsA("TouchTransmitter") then
+						v:Destroy()
+					end
+					if v:IsA("BasePart") or v:IsA("Part") then
+						v.CanCollide = false
+						v.CanQuery = false
+						v.CanTouch = false
+					end
+				else
+					if v:IsA("BasePart") or v:IsA("Part") then
+						v.CanQuery = true
+						v.CanTouch = true
+						if v.Name == "CollisionPart" then
+							v.CanCollide = true
+						end
+					end
+				end
+			end
+		end)
+	end
+})
+local Tab2 = MAINUI:CreateTab("Player", "user")
+local DisableTpCheck = Tab2:CreateToggle({
+	Name = "Disable TP check",
+	CurrentValue = false,
+	Flag = "asd",
+	Callback = function(Value)
+
+	end
+})
+Tab2:CreateSlider({
+	Name = "Player walkspeed",
+	Range = {0, 50},
+	Increment = 0.2,
+	Suffix = "",
+	CurrentValue = 0,
+	Flag = "Slider4",
+	Callback = function(Value) State.PlayerSpeed = Value / 10 end
+})
+local PlayerSpeedToggle = Tab2:CreateToggle({
+	Name = "Enable Player Walkspeed",
+	CurrentValue = false,
+	Flag = "ProtectedPlayerToggle",
+	Callback = function(Value)
+		State.IsOnPlayerSpeed = Value
+		if not Value then
+			stopLoop("walkspeed")
+			return
+		end
+		startLoop("walkspeed")
+		task.spawn(function()
+			local char = getChar()
+			if not char then return end
+			local hrp = char.HumanoidRootPart
+			local hum = char.Humanoid
+			while State.ActiveLoops["walkspeed"] do
+				pcall(function()
+					if not hum.Sit and hum.MoveDirection.Magnitude > 0 then
+						hrp.CFrame = hrp.CFrame + (hum.MoveDirection * State.PlayerSpeed)
+					end
+				end)
+				task.wait()
+			end
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Enable Infinite Stamina",
+	CurrentValue = false,
+	Flag = "sdasdasd",
+	Callback = function(Value)
+		if Value then
+			State.IsOnPlayerSpeed = true
+			startLoop("infstamina")
+		else
+			State.IsOnPlayerSpeed = false
+			stopLoop("infstamina")
+		end
+		pcall(function()
+			local staminaValue = Player.PlayerGui.GameGui.MainHUD.Values:FindFirstChildWhichIsA("NumberValue")
+			staminaValue.Value = 100
+			staminaValue.Name = Value and "somename" or "CurrStamina"
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Enable Player Noclip",
+	CurrentValue = false,
+	Flag = "Toggle",
+	Callback = function(Value)
+		if not Value then
+			stopLoop("noclip")
+			local char = getChar()
+			if char then
+				pcall(function()
+					for _, v in ipairs(char:GetDescendants()) do
+						if v:IsA("BasePart") or v:IsA("Part") or v:IsA("MeshPart") then
+							v.CanCollide = true
+							v.CanQuery = true
+							v.CanTouch = true
+						end
+					end
+				end)
+			end
+			return
+		end
+		startLoop("noclip")
+		task.spawn(function()
+			local char = getChar()
+			if not char then return end
+			while State.ActiveLoops["noclip"] do
+				pcall(function()
+					for _, v in ipairs(char:GetDescendants()) do
+						if v:IsA("BasePart") or v:IsA("Part") or v:IsA("MeshPart") then
+							v.CanCollide = false
+							v.CanQuery = false
+							v.CanTouch = false
+						end
+					end
+				end)
+				task.wait()
+			end
+		end)
+	end
+})
+Tab2:CreateButton({
+	Name = "Instant respawn",
+	Callback = function()
+		pcall(function()
+			local settings = ReplicatedStorage:WaitForChild("FE"):WaitForChild("GetDataAttribute"):InvokeServer("ClientSettings")
+			local spawnLoc = settings["CivSpawnLocation"]
+			ReplicatedStorage:WaitForChild("FE"):WaitForChild("Actions"):WaitForChild("Environmental"):FireServer(250)
+			task.wait()
+			ReplicatedStorage:WaitForChild("FE"):WaitForChild("DeathRespawn"):FireServer(spawnLoc)
+		end)
+		--[[pcall(function()
+			for i,v in pairs(workspace.CarWashes:GetChildren()) do
+				if not v:FindFirstChild("Conveyor") then continue end
+				firetouchinterest(workspace.CarWashes:GetChildren()[i].Conveyor, workspace:FindFirstChild(game.Players.LocalPlayer.Name).HumanoidRootPart, true)
+				firetouchinterest(workspace.CarWashes:GetChildren()[i].Conveyor, workspace:FindFirstChild(game.Players.LocalPlayer.Name).HumanoidRootPart, false)
+			end
+		end)]]
+	end
+})
+Tab2:CreateToggle({
+	Name = "Toggle Enviromental damage",
+	CurrentValue = true,
+	Flag = "Toggle",
+	Callback = function(Value)
+		if Value then
+			stopLoop("nodamage")
+		else
+			startLoop("nodamage")
+		end
+		pcall(function()
+			local char = getChar()
+			if char and char:FindFirstChild("DamageHandler") then
+				char.DamageHandler.Enabled = Value
+				char.DamageHandler.Disabled = not Value
+			end
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Toggle Inf jump",
+	CurrentValue = false,
+	Flag = "Toggle",
+	Callback = function(Value)
+		running = Value
+		game:GetService("UserInputService").JumpRequest:connect(function()
+			if not running then return end
+			game:GetService"Players".LocalPlayer.Character:FindFirstChildOfClass('Humanoid'):ChangeState("Jumping")		
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Enable Anti Arrest",
+	CurrentValue = false,
+	Flag = "Toggle",
+	Callback = function(Value)
+		if not Value then
+			stopLoop("antiarrest")
+			return
+		end
+		startLoop("antiarrest")
+		task.spawn(function()
+			while State.ActiveLoops["antiarrest"] do
+				pcall(function()
+					if Player:FindFirstChild("In_Handcuffs") then
+						local settings = ReplicatedStorage:WaitForChild("FE"):WaitForChild("GetDataAttribute"):InvokeServer("ClientSettings")
+						local spawnLoc = settings["CivSpawnLocation"]
+						ReplicatedStorage:WaitForChild("FE"):WaitForChild("Actions"):WaitForChild("Environmental"):FireServer(180)
+						task.wait(0.01)
+						ReplicatedStorage:WaitForChild("FE"):WaitForChild("DeathRespawn"):FireServer(spawnLoc)
+					end
+				end)
+				--[[if Player:FindFirstChild("In_Handcuffs") then
+					pcall(function()
+						for i,v in pairs(workspace.CarWashes:GetChildren()) do
+							if not v:FindFirstChild("Conveyor") then continue end
+							firetouchinterest(workspace.CarWashes:GetChildren()[i].Conveyor, workspace:FindFirstChild(game.Players.LocalPlayer.Name).HumanoidRootPart, true)
+							firetouchinterest(workspace.CarWashes:GetChildren()[i].Conveyor, workspace:FindFirstChild(game.Players.LocalPlayer.Name).HumanoidRootPart, false)
+						end
+					end)
+				end]]
+				task.wait()
+			end
+		end)
+	end
+})
+Tab2:CreateSection("Trolling")
+Tab2:CreateButton({
+	Name = "Get Basketball",
+	Callback = function()
+		pcall(function()
+			if not workspace.Basketballs:FindFirstChild("BasketballPart") then alert("warning", "Could not find basketball") return end
+			if not getChar() then return end
+			firetouchinterest(workspace.Basketballs:FindFirstChild("BasketballPart"), workspace:FindFirstChild(game.Players.LocalPlayer.Name).HumanoidRootPart,true)
+			task.wait()
+			firetouchinterest(workspace.Basketballs:FindFirstChild("BasketballPart"), workspace:FindFirstChild(game.Players.LocalPlayer.Name).HumanoidRootPart,false)
+			task.wait()
+			workspace:FindFirstChild(game.Players.LocalPlayer.Name):WaitForChild("Basketball", 5)["Basketball LS"].Enabled = false
+			workspace:FindFirstChild(game.Players.LocalPlayer.Name):WaitForChild("Basketball", 5)["Basketball LS"].Disabled = true
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Make item invisible",
+	CurrentValue = false,
+	Flag = "Toggle",
+	Callback = function(Value)
+		pcall(function()
+			local char = getChar()
+			if not char then return end
+			for _, v in pairs(char:GetChildren()) do
+				if v:IsA("Tool") then
+					if Value then
+						alert("info", "Please do not unequip your tool.")
+						local orgGrip = v.Grip
+						v.Grip = CFrame.new(0, -10, 10)
+						char.Humanoid:UnequipTools()
+						task.wait()
+						char.Humanoid:EquipTool(Player.Backpack:FindFirstChild(v.Name))
+						task.wait()
+						v.Handle.Name = "Handles"
+					else
+						v.Handles.Name = "Handle"
+						char.Humanoid:UnequipTools()
+						task.wait()
+						char.Humanoid:EquipTool(Player.Backpack:FindFirstChild(v.Name))
+						task.wait()
+						v.Grip = CFrame.new(0, 0, 0)
+						char.Humanoid:UnequipTools()
+						task.wait()
+						char.Humanoid:EquipTool(Player.Backpack:FindFirstChild(v.Name))
+					end
+				end
+			end
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Enable Arrest Aura (radius ~ 10 studs)",
+	CurrentValue = false,
+	Flag = "Toggle",
+	Callback = function(Value)
+		if not Value then
+			stopLoop("arrestaura")
+			return
+		end
+		if Player.Team ~= game.Teams.Police and Player.Team ~= game.Teams.Sheriff then
+			alert("warning", "You are not on the police team!")
+			return
+		end
+		startLoop("arrestaura")
+		task.spawn(function()
+			local char = getChar()
+			if not char then return end
+			local hrp = char.HumanoidRootPart
+			local radius = 15
+			while State.ActiveLoops["arrestaura"] do
+				pcall(function()
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= Player and player.Character and player:FindFirstChild("Is_Wanted") then
+							local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
+							if targetHRP and (targetHRP.Position - hrp.Position).Magnitude < radius then
+								if targetHRP.Parent.Humanoid.Health == 0 then return end
+								if not char:FindFirstChild("Handcuffs") then
+									if Player.Backpack:FindFirstChild("Handcuffs") then
+										if char.Humanoid.Sit then
+											alert("warning", "Do not use this while in a car!")
+											ReplicatedStorage:WaitForChild("FE"):WaitForChild("VehicleExit"):FireServer(char.Humanoid.SeatPart)
+										end
+										char.Humanoid:EquipTool(Player.Backpack:FindFirstChild("Handcuffs"))
+									else
+										alert("warning", "Could not find handcuffs!")
+										return false
+									end
+								end
+								if targetPlayer.Character.Humanoid.Sit then
+									local car = nil
+									for _, v in pairs(VehicleFolder:GetChildren()) do
+										if v:GetAttribute("Owner") == targetPlayer.Character.Name then
+											car = v
+											break
+										end
+									end
+									if car then
+										ReplicatedStorage:WaitForChild("FE"):WaitForChild("Eject"):FireServer(targetPlayer, car)
+									end
+								end
+								ReplicatedStorage:WaitForChild("FE"):WaitForChild("UseHandcuffs"):InvokeServer("Handcuff", targetPlayer, false)
+								task.wait()
+								ReplicatedStorage:WaitForChild("FE"):WaitForChild("UseHandcuffs"):InvokeServer("Arrest", targetPlayer)
+							end
+						end
+					end
+				end)
+				task.wait()
+			end
+		end)
+	end
+})
+Tab2:CreateToggle({
+	Name = "Enable Auto Arrest if in radius",
+	CurrentValue = false,
+	Flag = "Toggle",
+	Callback = function(Value)
+		if not Value then
+			stopLoop("autoarrest")
+			return
+		end
+		if Player.Team ~= game.Teams.Police and Player.Team ~= game.Teams.Sheriff then
+			alert("warning", "You are not on the police team!")
+			return
+		end
+		startLoop("autoarrest")
+		task.spawn(function()
+			local char = getChar()
+			if not char then return end
+			local hrp = char.HumanoidRootPart
+			local radius = 60
+			while State.ActiveLoops["autoarrest"] do
+				pcall(function()
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= Player and player.Character and player:FindFirstChild("Is_Wanted") then
+							local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
+							if targetHRP then
+								if targetHRP.Parent.Humanoid.Health == 0 then return end
+								local distance = (targetHRP.Position - hrp.Position).Magnitude
+								if distance < radius then
+									if distance > 14 then
+										hrp.CFrame = targetHRP.CFrame
+									end
+									repeat
+                                        if not char:FindFirstChild("Handcuffs") and Player.Backpack:FindFirstChild("Handcuffs") then
+                                            if char.Humanoid.Sit then
+                                                char.Humanoid.Sit = false
+                                            end
+                                            char.Humanoid:EquipTool(Player.Backpack:FindFirstChild("Handcuffs"))
+                                        end
+                                        if player.Character.Humanoid.Sit then
+                                            local car = nil
+                                            for _, v in pairs(VehicleFolder:GetChildren()) do
+                                                if v:GetAttribute("Owner") == player.Character.Name then
+                                                    car = v
+                                                    break
+                                                end
+                                            end
+                                            if car then
+                                                hrp.CFrame = targetHRP.CFrame * CFrame.new(0, 4, 0)
+                                                ReplicatedStorage:WaitForChild("FE"):WaitForChild("Eject"):FireServer(player, car)
+                                            end
+                                        end
+										hrp.CFrame = targetHRP.CFrame
+										ReplicatedStorage:WaitForChild("FE"):WaitForChild("UseHandcuffs"):InvokeServer("Handcuff", player, false)
+										if State.IsPrivateServer then
+											ReplicatedStorage:WaitForChild("FE"):WaitForChild("Chat"):FireServer("-cuffs-")
+										end
+										ReplicatedStorage:WaitForChild("FE"):WaitForChild("UseHandcuffs"):InvokeServer("Arrest", player)
+                                        task.wait()
+									until not player or player.Team == game.Teams.Jail
+									char.Humanoid:UnequipTools()
+								end
+							end
+						end
+					end
+				end)
+			end
+		end)
+	end
+})
+Tab2:CreateSection("Gun Mods")
+Tab2:CreateButton({
+	Name = "Enable FireRate",
+	Callback = function()
+		pcall(function()
+			local a = game:GetService("ReplicatedStorage").Shared.WeaponStats:GetChildren()
+			for i,v in pairs(a) do
+				local a = require(v)
+				setreadonly(a, false)
+				a["FireRate"] = 0.01
+			end
+		end)
+	end
+})
+Tab2:CreateButton({
+	Name = "Enable no recoil",
+	Callback = function()
+		pcall(function()
+			local a = game:GetService("ReplicatedStorage").Shared.WeaponStats:GetChildren()
+			for i,v in pairs(a) do
+				local a = require(v)
+				setreadonly(a, false)
+				a["RecoilPatternX"] = Vector2.new(0,0)
+				a["RecoilPatternY"] = Vector2.new(0,0)
+				a["RecoilPatternZ"] = Vector2.new(0,0)
+				a["MovementPatternX"] = Vector2.new(0,0)
+				a["MovementPatternY"] = Vector2.new(0,0)
+				a["MovementPatternZ"] = Vector2.new(0,0)
+				a["CrosshairSize"] = 0
+				a["CrosshairSizeIncrease"] = 0
+				a["ModelKickSpeed"] = 0
+				a["ModelKickDampener"] = 0
+				a["CameraKickSpeed"] = 0
+				a["CameraAimKickSpeed"] = 0
+				a["CameraAimSensitivityMult"] = 0
+				a["CameraAimKickMax"] = Vector3.new(00,0,0)
+				a["CameraAimKickMin"] = Vector3.new(0,0,0)
+				a["CameraKickMax"] = Vector3.new(0,0,0)
+				a["CameraKickMin"] = Vector3.new(0,0,0)
+			end
+		end)
+	end
+})
+Tab2:CreateButton({
+	Name = "Enable Reload mod",
+	Callback = function()
+		pcall(function()
+			local a = game:GetService("ReplicatedStorage").Shared.WeaponStats:GetChildren()
+			for i,v in pairs(a) do
+				local a = require(v)
+				setreadonly(a, false)
+				a["ReloadSpeed"] = 0.001
+			end
+		end)
+	end
+})
+local Visual = MAINUI:CreateTab("Visuals", "star")
+Visual:CreateSlider({
+	Name = "Time",
+	Range = {0, 24},
+	Increment = 1,
+	Suffix = "",
+	CurrentValue = 0,
+	Flag = "Slider4",
+	Callback = function(Value)
+		State.VisualLightTime = Value
+	end,
+})
+Visual:CreateToggle({
+	Name = "Enable Visual time",
+	CurrentValue = false,
+	Flag = "Toggle3",
+	Callback = function(Value)
+		running = Value
+		local path = game:GetService("Lighting")
+		pcall(function()
+			while running do
+				if not running then return end
+				path.ClockTime = State.VisualLightTime
+				task.wait()
+			end
+		end)
+	end
+})
+Visual:CreateToggle({
+	Name = "Enable ESP",
+	CurrentValue = false,
+	Flag = "Toggle3",
+	Callback = function(Value)
+		local Players, RunService, LP, Cam = game:GetService("Players"), game:GetService("RunService"), Players.LocalPlayer, workspace.CurrentCamera
+		local espObjects = {}
+		local function stopESP()
+			local existing = LP.PlayerGui:FindFirstChild("asd0912lSADl12")
+			if existing then existing:Destroy() end
+			
+			for _, c in pairs(State.ESPConnections or {}) do 
+				if c and c.Disconnect then 
+					pcall(function() c:Disconnect() end)
+				end
+			end
+			State.ESPConnections = {}
+			espObjects = {}
+		end
+		local function startESP()
+			stopESP()
+			
+			local espFolder = Instance.new("Folder", LP.PlayerGui)
+			espFolder.Name = "asd0912lSADl12"
+			local gui = Instance.new("ScreenGui", espFolder)
+			gui.IgnoreGuiInset = true
+			gui.ResetOnSpawn = false
+
+			local function createBox(color)
+				local box = Instance.new("Frame", gui)
+				box.BackgroundTransparency = 0.4
+				box.BackgroundColor3 = color
+				box.BorderSizePixel = 0
+				local stroke = Instance.new("UIStroke", box)
+				stroke.Color = color
+				stroke.Thickness = 2
+				return box
+			end
+			local function updateBox(char, box)
+				if not (char and char.Parent and box and box.Parent) then
+					if box then box.Visible = false end
+					return
+				end
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				local humanoid = char:FindFirstChildOfClass("Humanoid")
+				if not (hrp and hrp.Parent and humanoid) then
+					box.Visible = false
+					return
+				end	
+				local success = pcall(function()
+					local size = char:GetExtentsSize()
+					local halfWidth = math.clamp(size.X * 0.25, 0.2, size.X)
+					local bottomOffset = -size.Y * 0.5
+					local topOffset = size.Y * 0.25 
+					local bottomWorld = hrp.Position + Vector3.new(0, bottomOffset, 0)
+					local topWorld = hrp.Position + Vector3.new(0, topOffset, 0)
+					local leftWorld = hrp.Position - hrp.CFrame.RightVector * halfWidth
+					local rightWorld = hrp.Position + hrp.CFrame.RightVector * halfWidth
+					local topScreen, topVis = Cam:WorldToViewportPoint(topWorld)
+					local botScreen, botVis = Cam:WorldToViewportPoint(bottomWorld)
+					local leftScreen, lVis = Cam:WorldToViewportPoint(leftWorld)
+					local rightScreen, rVis = Cam:WorldToViewportPoint(rightWorld)
+					local hrpScreen, hrpVis = Cam:WorldToViewportPoint(hrp.Position)
+					if not hrpVis then
+						box.Visible = false
+						return
+					end
+					local minX = math.min(topScreen.X, botScreen.X, leftScreen.X, rightScreen.X)
+					local minY = math.min(topScreen.Y, botScreen.Y, leftScreen.Y, rightScreen.Y)
+					local maxX = math.max(topScreen.X, botScreen.X, leftScreen.X, rightScreen.X)
+					local maxY = math.max(topScreen.Y, botScreen.Y, leftScreen.Y, rightScreen.Y)
+					local width = math.max(6, maxX - minX)
+					local height = math.max(6, maxY - minY)
+					local pad = 4
+					box.Position = UDim2.fromOffset(minX - pad, minY - pad)
+					box.Size = UDim2.fromOffset(width + pad * 2, height + pad * 2)
+					box.Visible = true
+					box.BackgroundTransparency = 1
+				end)
+				if not success then
+					box.Visible = false
+				end
+			end
+			local function createESP(plr)
+				if not plr or plr == LP then return end
+				local color = plr.Team and plr.Team.TeamColor.Color or Color3.new(0, 1, 0)
+				local guiObj = Instance.new("BillboardGui", espFolder)
+				guiObj.AlwaysOnTop = true
+				guiObj.Size = UDim2.new(0, 100, 0, 50)
+				guiObj.StudsOffset = Vector3.new(0, 3, 0)
+				guiObj.MaxDistance = 9e9
+				local label = Instance.new("TextLabel", guiObj)
+				local stro = Instance.new("UIStroke")
+				stro.Parent = label
+				stro.Color = Color3.new(0,0,0)
+				stro.Thickness = 1
+				label.Size = UDim2.new(3, 0, 0, 16)
+				label.Position = UDim2.new(-1,0,0,0)
+				label.BackgroundTransparency = 1
+				label.TextScaled = true
+				label.Font = Enum.Font.GothamMedium
+				label.TextColor3 = color
+				label.Text = "Loading..."
+				local box = createBox(color)
+				espObjects[plr] = {Gui = guiObj, Label = label, Box = box}
+			end
+			local function removeESP(plr)
+				local esp = espObjects[plr]
+				if esp then
+					pcall(function()
+						if esp.Gui and esp.Gui.Parent then esp.Gui:Destroy() end
+					end)
+					pcall(function()
+						if esp.Box and esp.Box.Parent then esp.Box:Destroy() end
+					end)
+					espObjects[plr] = nil
+				end
+			end
+			local function updateESP()
+				local lpChar = LP.Character
+				if not (lpChar and lpChar.Parent) then return end
+				local lpHrp = lpChar:FindFirstChild("HumanoidRootPart")
+				if not (lpHrp and lpHrp.Parent) then return end
+				for plr, esp in pairs(espObjects) do
+					if not plr or not plr.Parent or not Players:FindFirstChild(plr.Name) then
+						removeESP(plr)
+					else
+						local char = plr.Character
+						if not (char and char.Parent) then
+							if esp.Gui then esp.Gui.Enabled = false end
+							if esp.Box then esp.Box.Visible = false end
+						else
+							local hrp = char:FindFirstChild("HumanoidRootPart")
+							local humanoid = char:FindFirstChildOfClass("Humanoid")
+							if hrp and hrp.Parent and lpHrp and lpHrp.Parent then
+								pcall(function()
+									local dist = (lpHrp.Position - hrp.Position).Magnitude
+									local color = (plr.Team and plr.Team.TeamColor and plr.Team.TeamColor.Color) or Color3.new(0, 1, 0)
+									local isMod = plr:FindFirstChild("IsMod") or false
+									local iswanted = plr:FindFirstChild("Is_Wanted") ~= nil
+									if esp.Gui then
+										esp.Gui.Adornee = hrp
+										esp.Gui.Enabled = true
+									end
+									if esp.Box then
+										esp.Box.BackgroundTransparency = 1
+									end
+									esp.Label.Text = string.format("%s | %.1f", plr.Name, dist)
+									if esp.Label then esp.Label.TextColor3 = color end
+									if esp.Box and esp.Box.UIStroke then esp.Box.UIStroke.Color = color end
+									if iswanted then
+										local warnColor = Color3.fromRGB(184, 84, 64)
+										if esp.Label then esp.Label.TextColor3 = warnColor end
+										if esp.Box and esp.Box.UIStroke then esp.Box.UIStroke.Color = warnColor end
+									end
+									if isMod then
+										esp.Label.Text = string.format("%s | %.1f | MOD", plr.Name, dist)
+										if esp.Label then esp.Label.TextColor3 = Color3.fromRGB(0, 255,0) end
+										if esp.Box and esp.Box.UIStroke then esp.Box.UIStroke.Color = Color3.fromRGB(0, 255,0) end
+									end
+									updateBox(char, esp.Box)
+								end)
+							else
+								if esp.Gui then esp.Gui.Enabled = false end
+								if esp.Box then esp.Box.Visible = false end
+								if esp.Label then esp.Label.Text = "N/A" end
+							end
+						end
+					end
+				end
+			end
+			for _, plr in pairs(Players:GetPlayers()) do 
+				if plr ~= LP then 
+					pcall(function() createESP(plr) end)
+				end 
+			end
+			State.ESPConnections.PlayerAdded = Players.PlayerAdded:Connect(function(plr)
+				plr.CharacterAdded:Connect(function()
+					task.wait(0.5)
+					if State.IsESPEnabled then 
+						pcall(function() createESP(plr) end)
+					end
+				end)
+			end)
+			State.ESPConnections.PlayerRemoving = Players.PlayerRemoving:Connect(function(plr)
+				pcall(function() removeESP(plr) end)
+			end)
+			State.ESPConnections.CharacterAdded = LP.CharacterAdded:Connect(function()
+				task.wait(1)
+				if State.IsESPEnabled then
+					startESP()
+				end
+			end)
+			State.ESPConnections.RenderStepped = RunService.RenderStepped:Connect(function()
+				pcall(updateESP)
+			end)
+		end
+		if not Value then
+			State.IsESPEnabled = false
+			stopESP()
+		else
+			State.IsESPEnabled = true
+			startESP()
+		end
+	end
+})
+local Tab4 = MAINUI:CreateTab("Keybinds", "keyboard")
+Tab4:CreateKeybind({
+	Name = "Turn on/off car fly ",
+	CurrentKeybind = "G",
+	HoldToInteract = false,
+	Flag = "Keybind3",
+	Callback = function()
+		State.IsOnCarFly = not State.IsOnCarFly
+		CarFlyToggle:Set(State.IsOnCarFly)
+		if State.IsOnCarFly then
+			if checkCar() then
+				local char = getChar()
+				if char and char.Humanoid.Sit then
+					stopLoop("carfly")
+					startLoop("carfly")
+					task.spawn(function()
+						while State.ActiveLoops["carfly"] and char.Humanoid.Sit do
+							pcall(function()
+								local camera = workspace.CurrentCamera
+								camera.CameraSubject = char.Humanoid
+								local collisionPart = char.Humanoid.SeatPart.Parent.Body:FindFirstChild('CollisionPart')
+								local gyro = Instance.new("BodyGyro")
+								gyro.Parent = collisionPart
+								gyro.CFrame = camera.CFrame
+								gyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+								gyro.P = 9e4
+								local vel = Instance.new("BodyVelocity")
+								vel.Parent = collisionPart
+								vel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+								vel.P = 9e6
+								vel.Velocity = Vector3.new(0, 0, 0)
+								while State.ActiveLoops["carfly"] and char.Humanoid.Sit do
+									local toset = Vector3.new(0, 0, 0)
+									if State.CarFlySpeed >= 2 then
+										if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+											toset = toset + camera.CFrame.LookVector * State.CarFlySpeed
+										end
+										if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+											toset = toset + camera.CFrame.LookVector * -State.CarFlySpeed
+										end
+										if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+											toset = toset + camera.CFrame.RightVector * -State.CarFlySpeed
+										end
+										if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+											toset = toset + camera.CFrame.RightVector * State.CarFlySpeed
+										end
+									end
+									vel.Velocity = toset
+									gyro.CFrame = camera.CFrame
+									task.wait()
+								end
+								vel:Destroy()
+								gyro:Destroy()
+							end)
+						end
+					end)
+				end
+			end
+		else
+			stopLoop("carfly")
+		end
+	end
+})
+Tab4:CreateKeybind({
+	Name = "Turn on/off car Speed ",
+	CurrentKeybind = "H",
+	HoldToInteract = false,
+	Flag = "Keybind4",
+	Callback = function()
+		State.IsOnCarSpeed = not State.IsOnCarSpeed
+		CarSpeedToggle:Set(State.IsOnCarSpeed)
+		if State.IsOnCarSpeed then
+		else
+			stopLoop("carspeed")
+		end
+	end
+})
+Tab4:CreateKeybind({
+	Name = "Turn on/off WalkSpeed",
+	CurrentKeybind = "C",
+	HoldToInteract = false,
+	Flag = "Keybind00",
+	Callback = function()
+		State.IsOnPlayerSpeed = not State.IsOnPlayerSpeed
+		PlayerSpeedToggle:Set(State.IsOnPlayerSpeed)
+		if State.IsOnPlayerSpeed then
+			stopLoop("walkspeed")
+			startLoop("walkspeed")
+			task.spawn(function()
+				local char = getChar()
+				if not char then return end
+				local hrp = char.HumanoidRootPart
+				local hum = char.Humanoid
+				while State.ActiveLoops["walkspeed"] do
+					pcall(function()
+						if not hum.Sit and hum.MoveDirection.Magnitude > 0 then
+							hrp.CFrame = hrp.CFrame + (hum.MoveDirection * State.PlayerSpeed)
+						end
+					end)
+					task.wait()
+				end
+			end)
+		else
+			stopLoop("walkspeed")
+		end
+	end
+})
+Tab4:CreateKeybind({
+	Name = "Instant Brake",
+	CurrentKeybind = "F",
+	HoldToInteract = false,
+	Flag = "Keybind1",
+	Callback = function()
+		if not checkCar() then return end
+		task.spawn(function()
+			pcall(function()
+				local base = State.MyCarPath.Body.Base
+				local seat = State.MyCarPath.DriverSeat
+				seat.Flip.D = 100000
+				seat.Flip.P = 100000
+				seat.Flip.MaxTorque = Vector3.new(100000, 1000, 100000)
+				local passedtime = 0
+				while base.AssemblyLinearVelocity.Magnitude > 0.2 do
+					base.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					task.wait()
+					passedtime = passedtime + 0.1
+					if passedtime > 1 then break end
+				end
+				seat.Flip.D = 0
+				seat.Flip.P = 0
+				seat.Flip.MaxTorque = Vector3.new(0, 0, 0)
+			end)
+		end)
+	end
+})
+Tab4:CreateKeybind({
+	Name = "FiveM style noclip",
+	CurrentKeybind = "V",
+	HoldToInteract = false,
+	Flag = "Keybind1",
+	Callback = function()
+		State.IsOnFreeCamNoclip = not State.IsOnFreeCamNoclip
+		if State.IsOnFreeCamNoclip then
+			if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+				startFreecam()
+				if Player.Character.Humanoid:GetState() == Enum.HumanoidStateType.Freefall  then
+					repeat task.wait() until Player.Character.Humanoid:GetState() ~= Enum.HumanoidStateType.Freefall
+				end
+				Player.Character.HumanoidRootPart.Anchored = true
+			end
+		else
+			local posToSet = camera.CFrame
+			if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+				local hrp = Player.Character.HumanoidRootPart
+				hrp.CFrame = CFrame.new(posToSet.Position, posToSet.Position + hrp.CFrame.LookVector)
+				hrp.AssemblyLinearVelocity = Vector3.new(0.01, 4, 0.01)
+				hrp.Anchored = false
+			end
+			stopFreecam()
+		end
+	end
+})
+local Tab6 = MAINUI:CreateTab("Other", "navigation")
+Tab6:CreateButton({
+	Name = "Unload interface (kicks you)",
+	Callback = function()
+		game.Players.LocalPlayer:Kick("Unloaded Interface")
+	end
+})
+if State.IsPrivateServer then
+	Tab6:CreateSection("Private Server")
+	Tab6:CreateLabel("Owner: "..tostring(game:GetService("ReplicatedStorage").PrivateServers:FindFirstChild("Info"):FindFirstChild("OwnerName").Value), "info", Color3.fromRGB(100,100,100), false)	
+	Tab6:CreateLabel("Server: "..tostring(game:GetService("ReplicatedStorage").PrivateServers:FindFirstChild("Info"):FindFirstChild("ServerName").Value), "info", Color3.fromRGB(100,100,100), false)	
+	Tab6:CreateLabel("Code: "..tostring(game:GetService("ReplicatedStorage").PrivateServers:FindFirstChild("Info"):FindFirstChild("Code").Value), "info", Color3.fromRGB(100,100,100), false)	
+end -- Private Server tab on Tab5
+Player.CharacterAdded:Connect(function(char)
+	task.wait(1)
+	reinitPlayerLoops()
+end)
+VehicleFolder.ChildAdded:Connect(function(vehicle)
+	if vehicle:GetAttribute("Owner") == Player.Name then
+		alert("success", "Detected new car spawn!")
+		task.wait(0.5)
+		findPlayerVehicle()
+	end
+end)
+
